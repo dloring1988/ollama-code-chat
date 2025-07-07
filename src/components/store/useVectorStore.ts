@@ -142,8 +142,54 @@ export const useVectorStore = () => {
     }
   }, [initDB]);
 
+  const searchWithEnhancedQueries = useCallback(async (queries: string[], topK: number = 10): Promise<string[]> => {
+    const database = await initDB();
+    
+    try {
+      const allDocs = await database.getAll('documents');
+      const uniqueResults = new Map<string, { content: string; filename: string; maxSimilarity: number }>();
+      
+      // Search with each enhanced query
+      for (const query of queries) {
+        const queryEmbedding = await generateEmbedding(query);
+        
+        const similarities = allDocs.map(doc => ({
+          content: doc.content,
+          similarity: cosineSimilarity(queryEmbedding, doc.embedding),
+          filename: doc.filename,
+          id: doc.id,
+        }));
+        
+        // Add to unique results, keeping the highest similarity score
+        similarities.forEach(item => {
+          if (item.similarity > 0.1) { // Minimum relevance threshold
+            const existing = uniqueResults.get(item.id);
+            if (!existing || item.similarity > existing.maxSimilarity) {
+              uniqueResults.set(item.id, {
+                content: item.content,
+                filename: item.filename,
+                maxSimilarity: item.similarity,
+              });
+            }
+          }
+        });
+      }
+      
+      // Sort by similarity and return top results
+      const sortedResults = Array.from(uniqueResults.values())
+        .sort((a, b) => b.maxSimilarity - a.maxSimilarity)
+        .slice(0, topK);
+      
+      return sortedResults.map(item => `[${item.filename}]\n${item.content}`);
+    } catch (error) {
+      console.error('Enhanced search error:', error);
+      return [];
+    }
+  }, [initDB]);
+
   return {
     processFiles,
     searchSimilar,
+    searchWithEnhancedQueries,
   };
 };

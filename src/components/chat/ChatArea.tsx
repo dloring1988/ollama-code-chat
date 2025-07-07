@@ -12,14 +12,16 @@ interface ChatAreaProps {
 
 export const ChatArea = ({ selectedModel, uploadedFiles }: ChatAreaProps) => {
   const [showContext, setShowContext] = useState(false);
+  const [showEnhancedQueries, setShowEnhancedQueries] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const { searchSimilar } = useVectorStore();
+  const { searchSimilar, searchWithEnhancedQueries } = useVectorStore();
   
   const {
     messages,
     isLoading,
     sendMessage,
     retrievedContext,
+    enhancedQueries,
   } = useChat(selectedModel, uploadedFiles);
 
   const scrollToBottom = () => {
@@ -34,7 +36,9 @@ export const ChatArea = ({ selectedModel, uploadedFiles }: ChatAreaProps) => {
     // Search for relevant context if files are loaded
     let context: string[] = [];
     if (uploadedFiles.length > 0) {
-      context = await searchSimilar(content, 5);
+      // First, try to get the enhanced queries or use the original content
+      const searchQueries = enhancedQueries.length > 0 ? enhancedQueries : [content];
+      context = await searchWithEnhancedQueries(searchQueries, 8);
     }
     
     await sendMessage(content, context);
@@ -42,15 +46,39 @@ export const ChatArea = ({ selectedModel, uploadedFiles }: ChatAreaProps) => {
 
   return (
     <div className="flex-1 flex flex-col bg-background">
-      {/* Context Toggle */}
-      {retrievedContext.length > 0 && (
-        <div className="p-2 border-b border-border">
-          <button
-            onClick={() => setShowContext(!showContext)}
-            className="text-sm text-muted-foreground hover:text-foreground transition-smooth"
-          >
-            {showContext ? 'Hide' : 'Show'} Context ({retrievedContext.length} chunks)
-          </button>
+      {/* Enhanced Context Controls */}
+      {(retrievedContext.length > 0 || enhancedQueries.length > 0) && (
+        <div className="p-2 border-b border-border flex gap-4">
+          {retrievedContext.length > 0 && (
+            <button
+              onClick={() => setShowContext(!showContext)}
+              className="text-sm text-muted-foreground hover:text-foreground transition-smooth"
+            >
+              {showContext ? 'Hide' : 'Show'} Context ({retrievedContext.length} chunks)
+            </button>
+          )}
+          {enhancedQueries.length > 0 && (
+            <button
+              onClick={() => setShowEnhancedQueries(!showEnhancedQueries)}
+              className="text-sm text-muted-foreground hover:text-primary transition-smooth"
+            >
+              {showEnhancedQueries ? 'Hide' : 'Show'} Enhanced Queries ({enhancedQueries.length})
+            </button>
+          )}
+        </div>
+      )}
+      
+      {/* Enhanced Queries Panel */}
+      {showEnhancedQueries && enhancedQueries.length > 0 && (
+        <div className="border-b border-border p-3 bg-muted/30">
+          <h4 className="text-sm font-medium mb-2">Enhanced Search Queries:</h4>
+          <div className="space-y-1">
+            {enhancedQueries.map((query, index) => (
+              <div key={index} className="text-xs text-muted-foreground bg-background/50 rounded p-2">
+                {index === 0 ? '🎯 Original: ' : '🔍 Enhanced: '}{query}
+              </div>
+            ))}
+          </div>
         </div>
       )}
       
@@ -73,7 +101,7 @@ export const ChatArea = ({ selectedModel, uploadedFiles }: ChatAreaProps) => {
           onSendMessage={handleSendMessage}
           disabled={isLoading}
           placeholder={uploadedFiles.length > 0 
-            ? "Ask about your code..." 
+            ? "Ask about your code (AI will enhance your query for better results)..." 
             : "Upload files to start chatting about your code"
           }
         />
