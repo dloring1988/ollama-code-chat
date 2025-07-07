@@ -12,10 +12,10 @@ export class ContextFetcherAgent implements Agent {
     'context_deduplication'
   ];
 
-  private vectorStore: any;
+  private embeddingModel: string;
 
-  constructor() {
-    // We'll inject the vector store when needed
+  constructor(embeddingModel: string = 'nomic-embed-text') {
+    this.embeddingModel = embeddingModel;
   }
 
   async execute(task: AgentTask): Promise<AgentResponse> {
@@ -59,9 +59,9 @@ export class ContextFetcherAgent implements Agent {
     }
 
     try {
-      // Use the vector store to search for context
+      // Use the vector store to search for context with the configured embedding model
       const { searchWithEnhancedQueries } = useVectorStore();
-      const contextChunks = await searchWithEnhancedQueries(queries, 12);
+      const contextChunks = await searchWithEnhancedQueries(queries, 12, this.embeddingModel);
       
       // Process and rank the context chunks
       const processedChunks = this.processContextChunks(contextChunks, queries);
@@ -72,14 +72,15 @@ export class ContextFetcherAgent implements Agent {
         metadata: {
           confidence: this.calculateConfidence(processedChunks),
           sources: processedChunks.map(chunk => chunk.filename),
-          executionTime: Date.now() - Date.now()
+          executionTime: Date.now() - Date.now(),
+          embeddingModel: this.embeddingModel
         }
       };
     } catch (error) {
       return {
         success: false,
         data: [],
-        error: `Context fetching failed: ${error.message}`
+        error: `Context fetching failed with embedding model ${this.embeddingModel}: ${error.message}`
       };
     }
   }
@@ -89,20 +90,21 @@ export class ContextFetcherAgent implements Agent {
     
     try {
       const { searchSimilar } = useVectorStore();
-      const results = await searchSimilar(query, topK);
+      const results = await searchSimilar(query, topK, this.embeddingModel);
       
       return {
         success: true,
         data: results,
         metadata: {
-          confidence: results.length > 0 ? 0.8 : 0.2
+          confidence: results.length > 0 ? 0.8 : 0.2,
+          embeddingModel: this.embeddingModel
         }
       };
     } catch (error) {
       return {
         success: false,
         data: [],
-        error: error.message
+        error: `Search failed with embedding model ${this.embeddingModel}: ${error.message}`
       };
     }
   }
@@ -153,7 +155,8 @@ export class ContextFetcherAgent implements Agent {
         relevanceScore: this.calculateRelevanceScore({ content, filename } as ContextChunk, queries.join(' ')),
         metadata: {
           chunkIndex: index,
-          originalRank: index
+          originalRank: index,
+          embeddingModel: this.embeddingModel
         }
       };
     });
@@ -202,5 +205,10 @@ export class ContextFetcherAgent implements Agent {
     const diversityScore = new Set(chunks.map(c => c.filename)).size / chunks.length;
     
     return Math.min((avgRelevance * 0.7 + diversityScore * 0.3), 1.0);
+  }
+
+  // Method to update the embedding model
+  updateEmbeddingModel(newModel: string) {
+    this.embeddingModel = newModel;
   }
 }

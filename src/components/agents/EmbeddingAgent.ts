@@ -11,6 +11,12 @@ export class EmbeddingAgent implements Agent {
     'embedding_optimization'
   ];
 
+  private embeddingModel: string;
+
+  constructor(embeddingModel: string = 'nomic-embed-text') {
+    this.embeddingModel = embeddingModel;
+  }
+
   async execute(task: AgentTask): Promise<AgentResponse> {
     const startTime = Date.now();
 
@@ -40,7 +46,7 @@ export class EmbeddingAgent implements Agent {
   }
 
   private async generateEmbedding(data: { text: string, model?: string }): Promise<AgentResponse> {
-    const { text, model = 'nomic-embed-text' } = data;
+    const { text, model = this.embeddingModel } = data;
 
     try {
       const response = await fetch('http://localhost:11434/api/embeddings', {
@@ -74,7 +80,7 @@ export class EmbeddingAgent implements Agent {
       };
     } catch (error) {
       // Fallback to dummy embedding for development
-      console.warn('Embedding generation failed, using fallback:', error.message);
+      console.warn(`Embedding generation failed with model ${model}, using fallback:`, error.message);
       
       const fallbackEmbedding = this.generateFallbackEmbedding(text);
       
@@ -85,7 +91,7 @@ export class EmbeddingAgent implements Agent {
           dimensions: fallbackEmbedding.length,
           model: 'fallback'
         },
-        error: `Using fallback embedding: ${error.message}`,
+        error: `Using fallback embedding (${model} not available): ${error.message}`,
         metadata: {
           confidence: 0.3,
           executionTime: Date.now() - Date.now()
@@ -99,7 +105,7 @@ export class EmbeddingAgent implements Agent {
     model?: string,
     batchSize?: number 
   }): Promise<AgentResponse> {
-    const { texts, model = 'nomic-embed-text', batchSize = 10 } = data;
+    const { texts, model = this.embeddingModel, batchSize = 10 } = data;
     const embeddings: number[][] = [];
     const errors: string[] = [];
 
@@ -142,9 +148,10 @@ export class EmbeddingAgent implements Agent {
         embeddings,
         totalProcessed: texts.length,
         successCount: texts.length - errors.length,
-        errorCount: errors.length
+        errorCount: errors.length,
+        model: model
       },
-      error: errors.length > 0 ? `${errors.length} embeddings failed` : undefined,
+      error: errors.length > 0 ? `${errors.length} embeddings failed with model ${model}` : undefined,
       metadata: {
         confidence: (texts.length - errors.length) / texts.length,
         executionTime: Date.now() - Date.now()
@@ -285,5 +292,10 @@ export class EmbeddingAgent implements Agent {
     }
     
     return Math.min(baseConfidence, 0.95);
+  }
+
+  // Method to update the embedding model
+  updateEmbeddingModel(newModel: string) {
+    this.embeddingModel = newModel;
   }
 }

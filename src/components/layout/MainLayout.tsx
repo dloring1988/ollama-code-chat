@@ -7,6 +7,7 @@ import { ModelSelector } from '../model/ModelSelector';
 export const MainLayout = () => {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [selectedModel, setSelectedModel] = useState('llama3.2');
+  const [selectedEmbeddingModel, setSelectedEmbeddingModel] = useState('nomic-embed-text');
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   return (
@@ -16,6 +17,7 @@ export const MainLayout = () => {
         onToggle={() => setSidebarOpen(!sidebarOpen)}
         selectedFiles={selectedFiles}
         onFilesChange={setSelectedFiles}
+        selectedEmbeddingModel={selectedEmbeddingModel}
       />
       
       <div className="flex-1 flex flex-col min-w-0">
@@ -39,7 +41,9 @@ export const MainLayout = () => {
           
           <ModelSelector 
             selectedModel={selectedModel}
+            selectedEmbeddingModel={selectedEmbeddingModel}
             onModelChange={setSelectedModel}
+            onEmbeddingModelChange={setSelectedEmbeddingModel}
           />
         </div>
 
@@ -48,6 +52,7 @@ export const MainLayout = () => {
           <div className="flex-1 min-w-0">
             <MultiAgentChatArea 
               selectedModel={selectedModel}
+              selectedEmbeddingModel={selectedEmbeddingModel}
               uploadedFiles={selectedFiles}
             />
           </div>

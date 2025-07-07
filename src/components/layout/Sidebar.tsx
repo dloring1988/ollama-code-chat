@@ -6,9 +6,10 @@ interface SidebarProps {
   onToggle: () => void;
   selectedFiles: File[];
   onFilesChange: (files: File[]) => void;
+  selectedEmbeddingModel: string;
 }
 
-export const Sidebar = ({ isOpen, selectedFiles, onFilesChange }: SidebarProps) => {
+export const Sidebar = ({ isOpen, selectedFiles, onFilesChange, selectedEmbeddingModel }: SidebarProps) => {
   if (!isOpen) return null;
 
   return (
@@ -33,6 +34,7 @@ export const Sidebar = ({ isOpen, selectedFiles, onFilesChange }: SidebarProps) 
         <FileUpload 
           selectedFiles={selectedFiles}
           onFilesChange={onFilesChange}
+          selectedEmbeddingModel={selectedEmbeddingModel}
         />
       </div>
 
@@ -43,8 +45,9 @@ export const Sidebar = ({ isOpen, selectedFiles, onFilesChange }: SidebarProps) 
 
       {/* Footer */}
       <div className="p-4 border-t border-sidebar-border">
-        <div className="text-xs text-sidebar-foreground/50 text-center">
-          {selectedFiles.length} files loaded
+        <div className="text-xs text-sidebar-foreground/50 text-center space-y-1">
+          <div>{selectedFiles.length} files loaded</div>
+          <div>Embedding: {selectedEmbeddingModel}</div>
         </div>
       </div>
     </div>

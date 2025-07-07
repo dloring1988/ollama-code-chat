@@ -7,10 +7,11 @@ import { useMultiAgentChat } from '../hooks/useMultiAgentChat';
 
 interface MultiAgentChatAreaProps {
   selectedModel: string;
+  selectedEmbeddingModel: string;
   uploadedFiles: File[];
 }
 
-export const MultiAgentChatArea = ({ selectedModel, uploadedFiles }: MultiAgentChatAreaProps) => {
+export const MultiAgentChatArea = ({ selectedModel, selectedEmbeddingModel, uploadedFiles }: MultiAgentChatAreaProps) => {
   const [showContext, setShowContext] = useState(false);
   const [showAgentTrace, setShowAgentTrace] = useState(false);
   const [showEnhancedQueries, setShowEnhancedQueries] = useState(false);
@@ -21,7 +22,8 @@ export const MultiAgentChatArea = ({ selectedModel, uploadedFiles }: MultiAgentC
     isLoading,
     sendMessage,
     updateModel,
-  } = useMultiAgentChat(selectedModel, uploadedFiles);
+    updateEmbeddingModel,
+  } = useMultiAgentChat(selectedModel, selectedEmbeddingModel, uploadedFiles);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -34,6 +36,10 @@ export const MultiAgentChatArea = ({ selectedModel, uploadedFiles }: MultiAgentC
   useEffect(() => {
     updateModel(selectedModel);
   }, [selectedModel, updateModel]);
+
+  useEffect(() => {
+    updateEmbeddingModel(selectedEmbeddingModel);
+  }, [selectedEmbeddingModel, updateEmbeddingModel]);
 
   const handleSendMessage = async (content: string) => {
     await sendMessage(content);
@@ -56,6 +62,9 @@ export const MultiAgentChatArea = ({ selectedModel, uploadedFiles }: MultiAgentC
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 bg-primary rounded-full animate-pulse"></div>
                 <span className="text-sm font-medium text-foreground">Multi-Agent System Active</span>
+                <div className="text-xs text-muted-foreground">
+                  LLM: {selectedModel} | Embedding: {selectedEmbeddingModel}
+                </div>
               </div>
               
               {lastMessage?.agentTrace?.length > 0 && (

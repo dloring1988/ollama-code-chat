@@ -10,18 +10,20 @@ import { VerifierAgent } from './VerifierAgent';
 export class AgentManager {
   private agents: Map<string, Agent> = new Map();
   private selectedModel: string;
+  private selectedEmbeddingModel: string;
 
-  constructor(selectedModel: string) {
+  constructor(selectedModel: string, selectedEmbeddingModel: string) {
     this.selectedModel = selectedModel;
+    this.selectedEmbeddingModel = selectedEmbeddingModel;
     this.initializeAgents();
   }
 
   private initializeAgents() {
-    // Initialize all agents
-    this.agents.set('embedding', new EmbeddingAgent());
+    // Initialize all agents with proper model configuration
+    this.agents.set('embedding', new EmbeddingAgent(this.selectedEmbeddingModel));
     this.agents.set('metadata', new MetadataExtractionAgent());
     this.agents.set('queries', new EnhancedQueriesMakerAgent(this.selectedModel));
-    this.agents.set('context', new ContextFetcherAgent());
+    this.agents.set('context', new ContextFetcherAgent(this.selectedEmbeddingModel));
     this.agents.set('manager', new ManagerAgent(this.selectedModel));
     this.agents.set('qa', new QuestionAnsweringAgent(this.selectedModel));
     this.agents.set('verifier', new VerifierAgent(this.selectedModel));
@@ -110,7 +112,7 @@ export class AgentManager {
       agentTrace.push({ agent: 'system', status: 'error', error: error.message, timestamp: Date.now() });
       
       return {
-        response: `I encountered an error while processing your request. The agent system failed at: ${agentTrace[agentTrace.length - 1]?.agent || 'unknown'}. Please try again.`,
+        response: `I encountered an error while processing your request. The agent system failed at: ${agentTrace[agentTrace.length - 1]?.agent || 'unknown'}. Please ensure both your LLM model (${this.selectedModel}) and embedding model (${this.selectedEmbeddingModel}) are available in Ollama.`,
         context: [],
         tools: [],
         enhancedQueries: [query],
@@ -125,10 +127,17 @@ export class AgentManager {
 
   updateModel(newModel: string) {
     this.selectedModel = newModel;
-    // Reinitialize agents that depend on the model
+    // Reinitialize agents that depend on the LLM model
     this.agents.set('queries', new EnhancedQueriesMakerAgent(newModel));
     this.agents.set('manager', new ManagerAgent(newModel));
     this.agents.set('qa', new QuestionAnsweringAgent(newModel));
     this.agents.set('verifier', new VerifierAgent(newModel));
+  }
+
+  updateEmbeddingModel(newEmbeddingModel: string) {
+    this.selectedEmbeddingModel = newEmbeddingModel;
+    // Reinitialize agents that depend on the embedding model
+    this.agents.set('embedding', new EmbeddingAgent(newEmbeddingModel));
+    this.agents.set('context', new ContextFetcherAgent(newEmbeddingModel));
   }
 }

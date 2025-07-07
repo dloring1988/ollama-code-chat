@@ -6,6 +6,7 @@ interface VectorDocument {
   content: string;
   embedding: number[];
   filename: string;
+  embeddingModel: string;
   metadata: {
     fileType: string;
     chunkIndex: number;
@@ -30,7 +31,7 @@ export const useVectorStore = () => {
   const initDB = useCallback(async () => {
     if (db) return db;
     
-    const database = await openDB<VectorDB>('vectorstore', 2, {
+    const database = await openDB<VectorDB>('vectorstore', 3, {
       upgrade(db, oldVersion) {
         if (oldVersion < 1) {
           if (!db.objectStoreNames.contains('documents')) {
@@ -46,6 +47,13 @@ export const useVectorStore = () => {
             store.createIndex('keywords', 'metadata.keywords', { multiEntry: true });
           }
         }
+        if (oldVersion < 3) {
+          // Add embedding model index
+          const store = db.transaction.objectStore('documents');
+          if (!store.indexNames.contains('embeddingModel')) {
+            store.createIndex('embeddingModel', 'embeddingModel');
+          }
+        }
       },
     });
     
@@ -53,7 +61,7 @@ export const useVectorStore = () => {
     return database;
   }, [db]);
 
-  const generateEmbedding = async (text: string): Promise<number[]> => {
+  const generateEmbedding = async (text: string, embeddingModel: string = 'nomic-embed-text'): Promise<number[]> => {
     try {
       const response = await fetch('http://localhost:11434/api/embeddings', {
         method: 'POST',
@@ -61,19 +69,19 @@ export const useVectorStore = () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'nomic-embed-text',
+          model: embeddingModel,
           prompt: text,
         }),
       });
 
       if (!response.ok) {
-        throw new Error('Failed to generate embedding');
+        throw new Error(`Embedding API error: ${response.statusText}`);
       }
 
       const data = await response.json();
       return data.embedding;
     } catch (error) {
-      console.error('Embedding error:', error);
+      console.error(`Embedding error with model ${embeddingModel}:`, error);
       // Fallback to dummy embedding for demo purposes
       return Array(384).fill(0).map(() => Math.random() - 0.5);
     }
@@ -145,7 +153,7 @@ export const useVectorStore = () => {
     return chunks;
   };
 
-  const processFiles = useCallback(async (files: File[]) => {
+  const processFiles = useCallback(async (files: File[], embeddingModel: string = 'nomic-embed-text') => {
     const database = await initDB();
     
     for (const file of files) {
@@ -155,13 +163,14 @@ export const useVectorStore = () => {
         
         for (let i = 0; i < chunks.length; i++) {
           const { content: chunkContent, metadata } = chunks[i];
-          const embedding = await generateEmbedding(chunkContent);
+          const embedding = await generateEmbedding(chunkContent, embeddingModel);
           
           const doc: VectorDocument = {
-            id: `${file.name}-${i}`,
+            id: `${file.name}-${i}-${embeddingModel}`,
             content: chunkContent,
             embedding,
             filename: file.name,
+            embeddingModel,
             metadata: {
               fileType: file.name.split('.').pop() || 'unknown',
               chunkIndex: i,
@@ -173,7 +182,7 @@ export const useVectorStore = () => {
           await database.put('documents', doc);
         }
       } catch (error) {
-        console.error(`Error processing file ${file.name}:`, error);
+        console.error(`Error processing file ${file.name} with embedding model ${embeddingModel}:`, error);
       }
     }
   }, [initDB]);
@@ -185,14 +194,22 @@ export const useVectorStore = () => {
     return dot / (magA * magB);
   };
 
-  const searchSimilar = useCallback(async (query: string, topK: number = 5): Promise<string[]> => {
+  const searchSimilar = useCallback(async (query: string, topK: number = 5, embeddingModel: string = 'nomic-embed-text'): Promise<string[]> => {
     const database = await initDB();
     
     try {
-      const queryEmbedding = await generateEmbedding(query);
-      const allDocs = await database.getAll('documents');
+      const queryEmbedding = await generateEmbedding(query, embeddingModel);
       
-      const similarities = allDocs.map(doc => ({
+      // Get documents with the same embedding model
+      const allDocs = await database.getAll('documents');
+      const compatibleDocs = allDocs.filter(doc => doc.embeddingModel === embeddingModel);
+      
+      if (compatibleDocs.length === 0) {
+        console.warn(`No documents found with embedding model: ${embeddingModel}`);
+        return [];
+      }
+      
+      const similarities = compatibleDocs.map(doc => ({
         content: doc.content,
         similarity: cosineSimilarity(queryEmbedding, doc.embedding),
         filename: doc.filename,
@@ -205,16 +222,24 @@ export const useVectorStore = () => {
         .slice(0, topK)
         .map(item => `[${item.filename}:${item.metadata.lineNumbers?.start || 1}-${item.metadata.lineNumbers?.end || 1}]\n${item.content}`);
     } catch (error) {
-      console.error('Search error:', error);
+      console.error(`Search error with embedding model ${embeddingModel}:`, error);
       return [];
     }
   }, [initDB]);
 
-  const searchWithEnhancedQueries = useCallback(async (queries: string[], topK: number = 10): Promise<string[]> => {
+  const searchWithEnhancedQueries = useCallback(async (queries: string[], topK: number = 10, embeddingModel: string = 'nomic-embed-text'): Promise<string[]> => {
     const database = await initDB();
     
     try {
+      // Get documents with the same embedding model
       const allDocs = await database.getAll('documents');
+      const compatibleDocs = allDocs.filter(doc => doc.embeddingModel === embeddingModel);
+      
+      if (compatibleDocs.length === 0) {
+        console.warn(`No documents found with embedding model: ${embeddingModel}`);
+        return [];
+      }
+      
       const uniqueResults = new Map<string, { 
         content: string; 
         filename: string; 
@@ -225,9 +250,9 @@ export const useVectorStore = () => {
       
       // Search with each enhanced query
       for (const query of queries) {
-        const queryEmbedding = await generateEmbedding(query);
+        const queryEmbedding = await generateEmbedding(query, embeddingModel);
         
-        const similarities = allDocs.map(doc => {
+        const similarities = compatibleDocs.map(doc => {
           const similarity = cosineSimilarity(queryEmbedding, doc.embedding);
           
           // Boost score based on metadata matches
@@ -290,7 +315,7 @@ export const useVectorStore = () => {
         `[${item.filename}:${item.metadata.lineNumbers?.start || 1}-${item.metadata.lineNumbers?.end || 1}]\n${item.content}`
       );
     } catch (error) {
-      console.error('Enhanced search error:', error);
+      console.error(`Enhanced search error with embedding model ${embeddingModel}:`, error);
       return [];
     }
   }, [initDB]);

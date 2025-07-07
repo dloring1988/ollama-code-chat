@@ -9,9 +9,10 @@ import { FolderOpen, Upload } from 'lucide-react';
 interface FileUploadProps {
   selectedFiles: File[];
   onFilesChange: (files: File[]) => void;
+  selectedEmbeddingModel: string;
 }
 
-export const FileUpload = ({ selectedFiles, onFilesChange }: FileUploadProps) => {
+export const FileUpload = ({ selectedFiles, onFilesChange, selectedEmbeddingModel }: FileUploadProps) => {
   const { processFiles } = useVectorStore();
   const { toast } = useToast();
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -33,27 +34,27 @@ export const FileUpload = ({ selectedFiles, onFilesChange }: FileUploadProps) =>
 
     onFilesChange([...selectedFiles, ...codeFiles]);
     
-    // Process files for vector search
+    // Process files for vector search with the selected embedding model
     try {
       toast({
         title: 'Processing files...',
-        description: 'Creating embeddings for vector search',
+        description: `Creating embeddings using ${selectedEmbeddingModel}`,
       });
       
-      await processFiles(codeFiles);
+      await processFiles(codeFiles, selectedEmbeddingModel);
       
       toast({
         title: 'Files processed!',
-        description: `${codeFiles.length} files ready for chat`,
+        description: `${codeFiles.length} files ready for chat with ${selectedEmbeddingModel} embeddings`,
       });
     } catch (error) {
       toast({
         title: 'Processing failed',
-        description: 'Could not create embeddings. Check Ollama connection.',
+        description: `Could not create embeddings with ${selectedEmbeddingModel}. Check Ollama connection and model availability.`,
         variant: 'destructive',
       });
     }
-  }, [selectedFiles, onFilesChange, processFiles, toast]);
+  }, [selectedFiles, onFilesChange, processFiles, selectedEmbeddingModel, toast]);
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     await processSelectedFiles(acceptedFiles);
@@ -86,6 +87,14 @@ export const FileUpload = ({ selectedFiles, onFilesChange }: FileUploadProps) =>
   return (
     <div className="space-y-4">
       <h3 className="text-sm font-medium text-sidebar-foreground">Upload Files</h3>
+      
+      {/* Embedding Model Info */}
+      <div className="text-xs text-sidebar-foreground/60 bg-sidebar-accent/30 p-2 rounded">
+        <div className="flex items-center gap-1">
+          <span>🧮</span>
+          <span>Embedding Model: <strong>{selectedEmbeddingModel}</strong></span>
+        </div>
+      </div>
       
       {/* Hidden folder input */}
       <input

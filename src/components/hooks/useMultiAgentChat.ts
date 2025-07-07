@@ -13,10 +13,10 @@ export interface MultiAgentMessage {
   verificationResults?: any;
 }
 
-export const useMultiAgentChat = (selectedModel: string, uploadedFiles: File[]) => {
+export const useMultiAgentChat = (selectedModel: string, selectedEmbeddingModel: string, uploadedFiles: File[]) => {
   const [messages, setMessages] = useState<MultiAgentMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [agentManager] = useState(() => new AgentManager(selectedModel));
+  const [agentManager] = useState(() => new AgentManager(selectedModel, selectedEmbeddingModel));
 
   const sendMessage = useCallback(async (content: string) => {
     const userMessage: MultiAgentMessage = {
@@ -55,18 +55,23 @@ export const useMultiAgentChat = (selectedModel: string, uploadedFiles: File[]) 
       const errorMessage: MultiAgentMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: `I encountered an error while processing your request. The multi-agent system failed with: ${error.message}. Please ensure Ollama is running and try again.`,
+        content: `I encountered an error while processing your request. The multi-agent system failed with: ${error.message}. Please ensure Ollama is running with both your LLM model (${selectedModel}) and embedding model (${selectedEmbeddingModel}) available.`,
         timestamp: new Date(),
       };
       setMessages(prev => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
     }
-  }, [selectedModel, uploadedFiles, messages, agentManager]);
+  }, [selectedModel, selectedEmbeddingModel, uploadedFiles, messages, agentManager]);
 
   // Update model when it changes
   const updateModel = useCallback((newModel: string) => {
     agentManager.updateModel(newModel);
+  }, [agentManager]);
+
+  // Update embedding model when it changes
+  const updateEmbeddingModel = useCallback((newEmbeddingModel: string) => {
+    agentManager.updateEmbeddingModel(newEmbeddingModel);
   }, [agentManager]);
 
   return {
@@ -74,5 +79,6 @@ export const useMultiAgentChat = (selectedModel: string, uploadedFiles: File[]) 
     isLoading,
     sendMessage,
     updateModel,
+    updateEmbeddingModel,
   };
 };
