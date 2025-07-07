@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Sidebar } from './Sidebar';
-import { ChatArea } from '../chat/ChatArea';
+import { MultiAgentChatArea } from '../chat/MultiAgentChatArea';
 import { FileExplorer } from '../files/FileExplorer';
 import { ModelSelector } from '../model/ModelSelector';
 
@@ -30,6 +30,11 @@ export const MainLayout = () => {
             </svg>
           </button>
           
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 bg-primary rounded-full animate-pulse"></div>
+            <span className="text-sm font-medium">Multi-Agent System</span>
+          </div>
+          
           <div className="flex-1" />
           
           <ModelSelector 
@@ -41,7 +46,7 @@ export const MainLayout = () => {
         {/* Main Content */}
         <div className="flex-1 flex min-h-0">
           <div className="flex-1 min-w-0">
-            <ChatArea 
+            <MultiAgentChatArea 
               selectedModel={selectedModel}
               uploadedFiles={selectedFiles}
             />
