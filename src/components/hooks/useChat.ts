@@ -7,6 +7,7 @@ export interface Message {
   timestamp: Date;
   tools?: ToolCall[];
   enhancedQueries?: string[];
+  contextUsed?: string[];
 }
 
 export interface ToolCall {
@@ -21,8 +22,30 @@ export const useChat = (selectedModel: string, uploadedFiles: File[]) => {
   const [retrievedContext, setRetrievedContext] = useState<string[]>([]);
   const [enhancedQueries, setEnhancedQueries] = useState<string[]>([]);
 
-  const generateEnhancedQueries = useCallback(async (originalQuery: string): Promise<string[]> => {
+  const generateEnhancedQueries = useCallback(async (originalQuery: string, conversationHistory: Message[]): Promise<string[]> => {
     try {
+      // Build conversation context for better query enhancement
+      const recentMessages = conversationHistory.slice(-4).map(msg => 
+        `${msg.role}: ${msg.content}`
+      ).join('\n');
+
+      const enhancementPrompt = `You are an expert at generating search queries for code repositories. Given a user's question and recent conversation context, generate 4-6 diverse search queries that would help find the most relevant code snippets, documentation, and examples.
+
+Recent conversation:
+${recentMessages}
+
+Current question: "${originalQuery}"
+
+Generate queries that cover:
+1. Direct implementation searches
+2. Related function/class names
+3. Error patterns and debugging
+4. Usage examples and patterns
+5. Documentation and comments
+6. Configuration and setup code
+
+Return only the search queries, one per line, without numbering:`;
+
       const response = await fetch('http://localhost:11434/api/generate', {
         method: 'POST',
         headers: {
@@ -30,19 +53,13 @@ export const useChat = (selectedModel: string, uploadedFiles: File[]) => {
         },
         body: JSON.stringify({
           model: selectedModel,
-          prompt: `You are a query enhancement assistant. Given a user's question about code, generate 3-5 different search queries that would help find relevant code snippets and documentation.
-
-User's question: "${originalQuery}"
-
-Generate queries that would help find:
-1. Direct code implementations
-2. Related functions/classes
-3. Documentation or comments
-4. Error handling patterns
-5. Usage examples
-
-Return only the queries, one per line, without numbering or explanation:`,
+          prompt: enhancementPrompt,
           stream: false,
+          options: {
+            temperature: 0.7,
+            top_p: 0.9,
+            max_tokens: 300,
+          }
         }),
       });
 
@@ -54,7 +71,8 @@ Return only the queries, one per line, without numbering or explanation:`,
       const queries = data.response
         .split('\n')
         .filter((line: string) => line.trim().length > 0)
-        .slice(0, 5);
+        .map((line: string) => line.replace(/^\d+\.\s*/, '').trim())
+        .slice(0, 6);
       
       return [originalQuery, ...queries];
     } catch (error) {
@@ -63,28 +81,118 @@ Return only the queries, one per line, without numbering or explanation:`,
     }
   }, [selectedModel]);
 
-  const executeTools = useCallback(async (query: string): Promise<ToolCall[]> => {
+  const executeTools = useCallback(async (query: string, context: string[]): Promise<ToolCall[]> => {
     const tools: ToolCall[] = [];
+    const queryLower = query.toLowerCase();
     
     // Code analysis tool
-    if (query.toLowerCase().includes('analyze') || query.toLowerCase().includes('explain')) {
+    if (queryLower.includes('analyze') || queryLower.includes('explain') || queryLower.includes('how does')) {
       tools.push({
         name: 'code_analyzer',
-        parameters: { query, type: 'analysis' },
-        result: 'Code analysis initiated for deeper understanding'
+        parameters: { 
+          query, 
+          type: 'deep_analysis',
+          context_chunks: context.length 
+        },
+        result: `Performing deep code analysis across ${context.length} relevant code sections`
       });
     }
     
     // Pattern search tool
-    if (query.toLowerCase().includes('pattern') || query.toLowerCase().includes('example')) {
+    if (queryLower.includes('pattern') || queryLower.includes('example') || queryLower.includes('similar')) {
       tools.push({
         name: 'pattern_search',
-        parameters: { query, type: 'pattern' },
-        result: 'Searching for code patterns and examples'
+        parameters: { 
+          query, 
+          type: 'pattern_matching',
+          scope: 'repository' 
+        },
+        result: 'Searching for similar patterns and usage examples across the codebase'
+      });
+    }
+
+    // Debug assistance tool
+    if (queryLower.includes('error') || queryLower.includes('bug') || queryLower.includes('fix') || queryLower.includes('debug')) {
+      tools.push({
+        name: 'debug_assistant',
+        parameters: { 
+          query, 
+          type: 'error_analysis',
+          context_available: context.length > 0 
+        },
+        result: 'Analyzing potential issues and suggesting debugging approaches'
+      });
+    }
+
+    // Documentation tool
+    if (queryLower.includes('document') || queryLower.includes('comment') || queryLower.includes('readme')) {
+      tools.push({
+        name: 'documentation_helper',
+        parameters: { 
+          query, 
+          type: 'documentation_search' 
+        },
+        result: 'Searching documentation and comments for relevant information'
+      });
+    }
+
+    // Refactoring tool
+    if (queryLower.includes('refactor') || queryLower.includes('improve') || queryLower.includes('optimize')) {
+      tools.push({
+        name: 'refactoring_assistant',
+        parameters: { 
+          query, 
+          type: 'code_improvement',
+          suggestions_needed: true 
+        },
+        result: 'Analyzing code for improvement opportunities and best practices'
       });
     }
     
     return tools;
+  }, []);
+
+  const buildSystemPrompt = useCallback((context: string[], toolCalls: ToolCall[], userQuery: string) => {
+    const hasContext = context.length > 0;
+    const hasTools = toolCalls.length > 0;
+
+    let systemPrompt = `You are an expert software engineer and code assistant with deep knowledge across multiple programming languages and frameworks. You excel at:
+
+🔍 **Code Analysis**: Understanding complex codebases, identifying patterns, and explaining functionality
+🛠️ **Problem Solving**: Debugging issues, suggesting improvements, and providing practical solutions
+📚 **Best Practices**: Recommending industry standards, design patterns, and optimization techniques
+🎯 **Contextual Help**: Providing relevant, actionable advice based on the specific codebase
+
+## Response Guidelines:
+- Be precise and technical while remaining clear
+- Provide code examples when helpful
+- Explain the reasoning behind your suggestions
+- Consider the broader context of the codebase
+- Highlight potential issues or improvements
+- Use proper formatting for code snippets
+
+`;
+
+    if (hasContext) {
+      systemPrompt += `## Available Context:
+You have access to ${context.length} relevant code sections from the user's repository. Use this context to provide specific, accurate answers about their codebase.
+
+`;
+    }
+
+    if (hasTools) {
+      systemPrompt += `## Active Tools:
+${toolCalls.map(tool => `- **${tool.name}**: ${tool.result}`).join('\n')}
+
+`;
+    }
+
+    systemPrompt += `## Current Task:
+${userQuery}
+
+Provide a comprehensive, helpful response that directly addresses the user's question while leveraging the available context and tools.`;
+
+    return systemPrompt;
   }, []);
 
   const sendMessage = useCallback(async (content: string, context: string[] = []) => {
@@ -101,23 +209,32 @@ Return only the queries, one per line, without numbering or explanation:`,
 
     try {
       // Generate enhanced queries for better context retrieval
-      const queries = await generateEnhancedQueries(content);
+      const queries = await generateEnhancedQueries(content, messages);
       setEnhancedQueries(queries);
       
       // Execute tools if applicable
-      const toolCalls = await executeTools(content);
+      const toolCalls = await executeTools(content, context);
       
-      // Construct RAG prompt with context and tools
-      let prompt = content;
+      // Build system prompt
+      const systemPrompt = buildSystemPrompt(context, toolCalls, content);
+      
+      // Construct the full prompt with context
+      let fullPrompt = systemPrompt;
+      
       if (context.length > 0) {
-        prompt = `Context from uploaded files:
-${context.map((chunk, i) => `[${i + 1}] ${chunk}`).join('\n\n')}
-
-${toolCalls.length > 0 ? `Available tools used: ${toolCalls.map(t => t.name).join(', ')}` : ''}
-
-Based on the above context, please answer the following question:
-${content}`;
+        fullPrompt += `\n\n## Code Context:\n${context.map((chunk, i) => `### Context ${i + 1}:\n${chunk}`).join('\n\n')}`;
       }
+
+      // Add conversation history for continuity
+      const recentHistory = messages.slice(-6).map(msg => 
+        `${msg.role === 'user' ? 'Human' : 'Assistant'}: ${msg.content}`
+      ).join('\n\n');
+
+      if (recentHistory) {
+        fullPrompt += `\n\n## Recent Conversation:\n${recentHistory}`;
+      }
+
+      fullPrompt += `\n\n## Current Question:\n${content}`;
 
       const response = await fetch('http://localhost:11434/api/generate', {
         method: 'POST',
@@ -126,8 +243,14 @@ ${content}`;
         },
         body: JSON.stringify({
           model: selectedModel,
-          prompt,
+          prompt: fullPrompt,
           stream: true,
+          options: {
+            temperature: 0.3,
+            top_p: 0.9,
+            max_tokens: 2048,
+            stop: ['Human:', 'User:'],
+          }
         }),
       });
 
@@ -146,6 +269,7 @@ ${content}`;
         timestamp: new Date(),
         tools: toolCalls,
         enhancedQueries: queries,
+        contextUsed: context,
       };
 
       setMessages(prev => [...prev, assistantMessage]);
@@ -180,14 +304,22 @@ ${content}`;
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: 'Sorry, I encountered an error. Please make sure Ollama is running on localhost:11434 and the model is available.',
+        content: `I encountered an error while processing your request. Please ensure:
+
+1. **Ollama is running**: Make sure Ollama is active on localhost:11434
+2. **Model is available**: Verify that the "${selectedModel}" model is installed
+3. **Network connectivity**: Check your connection to the Ollama service
+
+You can test Ollama by running: \`ollama list\` to see available models.
+
+Error details: ${error.message}`,
         timestamp: new Date(),
       };
       setMessages(prev => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
     }
-  }, [selectedModel]);
+  }, [selectedModel, messages, generateEnhancedQueries, executeTools, buildSystemPrompt]);
 
   return {
     messages,

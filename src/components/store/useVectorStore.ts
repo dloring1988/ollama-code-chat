@@ -10,6 +10,10 @@ interface VectorDocument {
     fileType: string;
     chunkIndex: number;
     totalChunks: number;
+    lineNumbers?: { start: number; end: number };
+    functionNames?: string[];
+    classNames?: string[];
+    keywords?: string[];
   };
 }
 
@@ -26,10 +30,21 @@ export const useVectorStore = () => {
   const initDB = useCallback(async () => {
     if (db) return db;
     
-    const database = await openDB<VectorDB>('vectorstore', 1, {
-      upgrade(db) {
-        if (!db.objectStoreNames.contains('documents')) {
-          db.createObjectStore('documents', { keyPath: 'id' });
+    const database = await openDB<VectorDB>('vectorstore', 2, {
+      upgrade(db, oldVersion) {
+        if (oldVersion < 1) {
+          if (!db.objectStoreNames.contains('documents')) {
+            const store = db.createObjectStore('documents', { keyPath: 'id' });
+            store.createIndex('filename', 'filename');
+            store.createIndex('fileType', 'metadata.fileType');
+          }
+        }
+        if (oldVersion < 2) {
+          // Add new indexes for better search
+          const store = db.transaction.objectStore('documents');
+          if (!store.indexNames.contains('keywords')) {
+            store.createIndex('keywords', 'metadata.keywords', { multiEntry: true });
+          }
         }
       },
     });
@@ -64,13 +79,64 @@ export const useVectorStore = () => {
     }
   };
 
-  const chunkText = (text: string, chunkSize: number = 1000, overlap: number = 200): string[] => {
-    const chunks: string[] = [];
+  const extractMetadata = (content: string, filename: string) => {
+    const lines = content.split('\n');
+    const functionNames: string[] = [];
+    const classNames: string[] = [];
+    const keywords: string[] = [];
+
+    // Extract function names
+    const functionRegex = /(?:function|def|const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/g;
+    let match;
+    while ((match = functionRegex.exec(content)) !== null) {
+      functionNames.push(match[1]);
+    }
+
+    // Extract class names
+    const classRegex = /(?:class|interface|type)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/g;
+    while ((match = classRegex.exec(content)) !== null) {
+      classNames.push(match[1]);
+    }
+
+    // Extract keywords
+    const keywordRegex = /\b(import|export|async|await|return|throw|catch|try|if|else|for|while|switch|case|break|continue)\b/g;
+    while ((match = keywordRegex.exec(content)) !== null) {
+      if (!keywords.includes(match[1])) {
+        keywords.push(match[1]);
+      }
+    }
+
+    return {
+      functionNames,
+      classNames,
+      keywords,
+    };
+  };
+
+  const chunkText = (text: string, filename: string, chunkSize: number = 1000, overlap: number = 200): Array<{content: string, metadata: any}> => {
+    const lines = text.split('\n');
+    const chunks: Array<{content: string, metadata: any}> = [];
     let start = 0;
 
     while (start < text.length) {
       const end = Math.min(start + chunkSize, text.length);
-      chunks.push(text.slice(start, end));
+      const chunkContent = text.slice(start, end);
+      
+      // Calculate line numbers for this chunk
+      const beforeChunk = text.slice(0, start);
+      const startLine = beforeChunk.split('\n').length;
+      const chunkLines = chunkContent.split('\n').length;
+      const endLine = startLine + chunkLines - 1;
+
+      const metadata = extractMetadata(chunkContent, filename);
+      
+      chunks.push({
+        content: chunkContent,
+        metadata: {
+          ...metadata,
+          lineNumbers: { start: startLine, end: endLine }
+        }
+      });
       
       if (end === text.length) break;
       start = end - overlap;
@@ -85,21 +151,22 @@ export const useVectorStore = () => {
     for (const file of files) {
       try {
         const content = await file.text();
-        const chunks = chunkText(content);
+        const chunks = chunkText(content, file.name);
         
         for (let i = 0; i < chunks.length; i++) {
-          const chunk = chunks[i];
-          const embedding = await generateEmbedding(chunk);
+          const { content: chunkContent, metadata } = chunks[i];
+          const embedding = await generateEmbedding(chunkContent);
           
           const doc: VectorDocument = {
             id: `${file.name}-${i}`,
-            content: chunk,
+            content: chunkContent,
             embedding,
             filename: file.name,
             metadata: {
               fileType: file.name.split('.').pop() || 'unknown',
               chunkIndex: i,
               totalChunks: chunks.length,
+              ...metadata,
             },
           };
           
@@ -129,13 +196,14 @@ export const useVectorStore = () => {
         content: doc.content,
         similarity: cosineSimilarity(queryEmbedding, doc.embedding),
         filename: doc.filename,
+        metadata: doc.metadata,
       }));
       
       similarities.sort((a, b) => b.similarity - a.similarity);
       
       return similarities
         .slice(0, topK)
-        .map(item => `[${item.filename}]\n${item.content}`);
+        .map(item => `[${item.filename}:${item.metadata.lineNumbers?.start || 1}-${item.metadata.lineNumbers?.end || 1}]\n${item.content}`);
     } catch (error) {
       console.error('Search error:', error);
       return [];
@@ -147,18 +215,54 @@ export const useVectorStore = () => {
     
     try {
       const allDocs = await database.getAll('documents');
-      const uniqueResults = new Map<string, { content: string; filename: string; maxSimilarity: number }>();
+      const uniqueResults = new Map<string, { 
+        content: string; 
+        filename: string; 
+        maxSimilarity: number;
+        metadata: any;
+        relevanceScore: number;
+      }>();
       
       // Search with each enhanced query
       for (const query of queries) {
         const queryEmbedding = await generateEmbedding(query);
         
-        const similarities = allDocs.map(doc => ({
-          content: doc.content,
-          similarity: cosineSimilarity(queryEmbedding, doc.embedding),
-          filename: doc.filename,
-          id: doc.id,
-        }));
+        const similarities = allDocs.map(doc => {
+          const similarity = cosineSimilarity(queryEmbedding, doc.embedding);
+          
+          // Boost score based on metadata matches
+          let relevanceBoost = 0;
+          const queryLower = query.toLowerCase();
+          
+          // Boost if query matches function names
+          if (doc.metadata.functionNames?.some(fn => queryLower.includes(fn.toLowerCase()))) {
+            relevanceBoost += 0.2;
+          }
+          
+          // Boost if query matches class names
+          if (doc.metadata.classNames?.some(cn => queryLower.includes(cn.toLowerCase()))) {
+            relevanceBoost += 0.2;
+          }
+          
+          // Boost if query matches keywords
+          if (doc.metadata.keywords?.some(kw => queryLower.includes(kw.toLowerCase()))) {
+            relevanceBoost += 0.1;
+          }
+          
+          // Boost if filename is relevant
+          if (doc.filename.toLowerCase().includes(queryLower) || queryLower.includes(doc.filename.toLowerCase().replace(/\.[^/.]+$/, ""))) {
+            relevanceBoost += 0.15;
+          }
+
+          return {
+            content: doc.content,
+            similarity: similarity + relevanceBoost,
+            filename: doc.filename,
+            id: doc.id,
+            metadata: doc.metadata,
+            relevanceScore: relevanceBoost,
+          };
+        });
         
         // Add to unique results, keeping the highest similarity score
         similarities.forEach(item => {
@@ -169,6 +273,8 @@ export const useVectorStore = () => {
                 content: item.content,
                 filename: item.filename,
                 maxSimilarity: item.similarity,
+                metadata: item.metadata,
+                relevanceScore: item.relevanceScore,
               });
             }
           }
@@ -180,7 +286,9 @@ export const useVectorStore = () => {
         .sort((a, b) => b.maxSimilarity - a.maxSimilarity)
         .slice(0, topK);
       
-      return sortedResults.map(item => `[${item.filename}]\n${item.content}`);
+      return sortedResults.map(item => 
+        `[${item.filename}:${item.metadata.lineNumbers?.start || 1}-${item.metadata.lineNumbers?.end || 1}]\n${item.content}`
+      );
     } catch (error) {
       console.error('Enhanced search error:', error);
       return [];

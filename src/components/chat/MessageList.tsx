@@ -1,5 +1,6 @@
 import { Message } from '../hooks/useChat';
 import { Card } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 
 interface MessageListProps {
   messages: Message[];
@@ -16,9 +17,9 @@ export const MessageList = ({ messages, isLoading }: MessageListProps) => {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
             </svg>
           </div>
-          <h3 className="text-lg font-semibold mb-2">Ready to chat about your code</h3>
+          <h3 className="text-lg font-semibold mb-2">Ready to analyze your code</h3>
           <p className="text-muted-foreground">
-            Upload some files and start asking questions about your codebase. I'll help you understand, debug, and improve your code.
+            Upload your codebase and start asking questions. I'll help you understand, debug, and improve your code with intelligent context search and analysis tools.
           </p>
         </div>
       </div>
@@ -32,25 +33,55 @@ export const MessageList = ({ messages, isLoading }: MessageListProps) => {
           key={message.id}
           className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
         >
-          <div className={`max-w-[80%] ${message.role === 'user' ? 'order-2' : ''}`}>
+          <div className={`max-w-[85%] ${message.role === 'user' ? 'order-2' : ''}`}>
             <Card className={`p-4 ${
               message.role === 'user' 
                 ? 'bg-primary text-primary-foreground ml-12' 
                 : 'bg-card mr-12'
             }`}>
+              {/* Tools and Context Info */}
+              {message.role === 'assistant' && (message.tools?.length > 0 || message.contextUsed?.length > 0) && (
+                <div className="mb-3 pb-3 border-b border-border/50">
+                  <div className="flex flex-wrap gap-2">
+                    {message.tools?.map((tool, index) => (
+                      <Badge key={index} variant="secondary" className="text-xs">
+                        🛠️ {tool.name.replace(/_/g, ' ')}
+                      </Badge>
+                    ))}
+                    {message.contextUsed?.length > 0 && (
+                      <Badge variant="outline" className="text-xs">
+                        📄 {message.contextUsed.length} context chunks
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Message Content */}
               <div className="whitespace-pre-wrap font-mono text-sm leading-relaxed">
                 {message.content}
               </div>
-              <div className={`text-xs mt-2 ${
+
+              {/* Message Footer */}
+              <div className={`flex items-center justify-between mt-3 pt-2 border-t border-border/30 ${
                 message.role === 'user' 
                   ? 'text-primary-foreground/70' 
                   : 'text-muted-foreground'
               }`}>
-                {message.timestamp.toLocaleTimeString()}
+                <div className="text-xs">
+                  {message.timestamp.toLocaleTimeString()}
+                </div>
+                
+                {message.role === 'assistant' && message.enhancedQueries?.length > 0 && (
+                  <div className="text-xs opacity-60">
+                    🔍 {message.enhancedQueries.length} search queries used
+                  </div>
+                )}
               </div>
             </Card>
           </div>
           
+          {/* Avatar */}
           <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
             message.role === 'user' 
               ? 'bg-primary text-primary-foreground order-1 ml-3' 
@@ -77,13 +108,13 @@ export const MessageList = ({ messages, isLoading }: MessageListProps) => {
             </svg>
           </div>
           <Card className="p-4 bg-card mr-12">
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-3">
               <div className="flex space-x-1">
                 <div className="w-2 h-2 bg-primary rounded-full animate-bounce"></div>
                 <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
                 <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
               </div>
-              <span className="text-sm text-muted-foreground">Thinking...</span>
+              <span className="text-sm text-muted-foreground">Analyzing your code...</span>
             </div>
           </Card>
         </div>
